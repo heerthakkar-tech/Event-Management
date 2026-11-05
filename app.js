@@ -7,8 +7,8 @@ const helmet = require("helmet"); // secure your app by setting various HTTP hea
 const sequelize = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const eventRoutes = require("./routes/eventRoutes");
+const registrationRoutes = require("./routes/registrationRoute");
 const { restoreScheduledEvents } = require("./services/eventScheduler");
-// const testRoutes = require("./routes/testRoutes");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -22,13 +22,14 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/events", eventRoutes);
-// app.use("/api/v1/test", testRoutes);
+app.use("/api/v1/events", registrationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Hello i am root");
 });
 
 app.use((err, req, res, next) => {
+  // console.error("ERROR DETAILS:", err);
   const statusCode = err.statusCode || 500;
 
   res.status(statusCode).json({

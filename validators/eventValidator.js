@@ -27,6 +27,15 @@ const publishEventIdSchema = Joi.object({
     .guid({ version: ["uuidv4", "uuidv5"] })
     .required(),
 });
+
+//view events schema
+
+const publishedEventsSchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+
+  limit: Joi.number().integer().min(1).max(100).default(10),
+});
+
 // update event schema
 const updateEventSchema = Joi.object({
   title: Joi.string().trim().min(3).max(255),
@@ -57,4 +66,5 @@ module.exports = {
   publishEventIdSchema,
   updateEventSchema,
   updateEventParamsSchema,
+  publishedEventsSchema,
 };

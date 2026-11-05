@@ -1,6 +1,8 @@
 const { Event, Category } = require("../models");
 const ROLES = require("../constants/roles");
 const { scheduleEventPublish } = require("./eventScheduler");
+const { Readable } = require("stream");
+const cloudinary = require("../config/cloudinary");
 
 const ALLOWED_FIELDS = [
   "title",
@@ -160,8 +162,31 @@ const publishEvent = async (eventId, userId, userRole) => {
   return event;
 };
 
+// Get all published events
+
+const publishedEvent = async ({ page, limit }) => {
+  const offset = (page - 1) * limit;
+
+  const { count, rows } = await Event.findAndCountAll({
+    where: {
+      status: "published",
+    },
+    order: [["startAt", "ASC"]],
+    offset,
+    limit,
+  });
+
+  return {
+    events: rows,
+    totalEvents: count,
+    currentPage: page,
+    totalPages: Math.ceil(count / limit),
+  };
+};
+
 //update event api
 const updateEvent = async ({ eventId, user, updates }) => {
+  //check so that user cannot update the not allowed fields like ticket price and status like this
   const invalidFields = Object.keys(updates).filter(
     (field) => !ALLOWED_FIELDS.includes(field),
   );
@@ -174,6 +199,7 @@ const updateEvent = async ({ eventId, user, updates }) => {
     throw error;
   }
 
+  //check if the event is available or not
   const event = await Event.findByPk(eventId);
 
   if (!event) {
@@ -181,8 +207,10 @@ const updateEvent = async ({ eventId, user, updates }) => {
     error.statusCode = 404;
     throw error;
   }
-  const isSuperAdmin = user.role === "super_admin";
-  const isOwner = event.organizerId === user.id;
+
+  //check if authorized user performing the action or not.
+  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const isOwner = String(event.organizerId) === String(user.id);
 
   if (!isSuperAdmin && !isOwner) {
     const error = new Error("You are not allowed to update this event");
@@ -190,6 +218,7 @@ const updateEvent = async ({ eventId, user, updates }) => {
     throw error;
   }
 
+  //cancelled events cannot be updated.
   if (event.status === "cancelled") {
     const error = new Error("Cancelled events cannot be updated");
     error.statusCode = 400;
@@ -217,9 +246,11 @@ const updateEvent = async ({ eventId, user, updates }) => {
     }
   }
 
+  // use the new start time if supplied,otherwise, use the existing start time
   const startAt = new Date(updates.startAt ?? event.startAt);
   const endAt = new Date(updates.endAt ?? event.endAt);
 
+  // this checks that the updated end date must be after start date
   if (
     Number.isNaN(startAt.getTime()) ||
     Number.isNaN(endAt.getTime()) ||
@@ -230,6 +261,7 @@ const updateEvent = async ({ eventId, user, updates }) => {
     throw error;
   }
 
+  // it checks use the new publishAt time provided or use the existing one
   const publishAt = Object.prototype.hasOwnProperty.call(updates, "publishAt")
     ? updates.publishAt
     : event.publishAt;
@@ -248,12 +280,14 @@ const updateEvent = async ({ eventId, user, updates }) => {
     }
   }
 
+  // already published events cannot be updated
   if (event.status === "published" && startAt <= new Date()) {
     const error = new Error("The event startAt must remain in the future");
     error.statusCode = 400;
     throw error;
   }
 
+  //This line detects whether the schedule of a published event has really changed because we have to send emails to the registered users so
   const scheduleChanged =
     event.status === "published" &&
     ((updates.startAt !== undefined &&
@@ -268,7 +302,7 @@ const updateEvent = async ({ eventId, user, updates }) => {
   }
 
   await event.save();
-
+  //If a scheduled event's publication time is updated, reschedule its publication job.
   if (
     event.status === "scheduled" &&
     Object.prototype.hasOwnProperty.call(updates, "publishAt")
@@ -276,15 +310,134 @@ const updateEvent = async ({ eventId, user, updates }) => {
     scheduleEventPublish(event);
   }
 
-  // email send model implementation is still remaining
+  // email send model implementation is still remaining when create registration module then will apply
   return {
     event,
     scheduleChanged,
   };
 };
 
+//delete event api
+const deleteEvent = async ({ eventId, user }) => {
+  // find the particular event by its eventId
+  const event = await Event.findByPk(eventId);
+
+  // check that the event is exist in the db or not.
+  if (!event) {
+    const error = new Error("Event not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // authorized user can delete the event
+  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const isOwner = String(event.organizerId) === String(user.id);
+
+  if (!isSuperAdmin && !isOwner) {
+    const error = new Error("You are not allowed to delete this event");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  //cancelled event cannot be deleted
+  if (event.status === "cancelled") {
+    const error = new Error("cancelled events cannot be delete");
+    error.statusCode = 400;
+    throw error;
+  }
+  await event.destroy();
+
+  return {
+    message: "event deleted successfully",
+  };
+};
+
+// the helper function to save banners in cloudinary
+const uploadToCloudinary = (fileBuffer) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "event-banners",
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+
+        resolve(result);
+      },
+    );
+
+    Readable.from(fileBuffer).pipe(uploadStream);
+  });
+};
+
+//banner upload api
+const uploadEventBanner = async ({ eventId, user, file }) => {
+  const event = await Event.findByPk(eventId);
+
+  if (!event) {
+    const error = new Error("Event Not Found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
+  const isOwner = String(event.organizerId) === String(user.id);
+
+  if (!isSuperAdmin && !isOwner) {
+    const error = new Error("You are not allowed to upload the banner");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (event.status === "cancelled") {
+    const error = new Error("Cannot upload banner for the cancelled events");
+    error.statusCode = 400;
+    throw error;
+  }
+  // Store the old banner public id
+  const oldBannerPublicId = event.bannerPublicId;
+
+  // Upload the new banner to Cloudinary
+  const uploadedImage = await uploadToCloudinary(file.buffer);
+
+  try {
+    // Save new banner details in the database
+    await event.update({
+      bannerUrl: uploadedImage.secure_url,
+      bannerPublicId: uploadedImage.public_id,
+    });
+  } catch (error) {
+    try {
+      await cloudinary.uploader.destroy(uploadedImage.public_id);
+    } catch (cleanupError) {
+      console.error(
+        "Failed to delete newly uploaded banner:",
+        cleanupError.message,
+      );
+    }
+
+    throw error;
+  }
+
+  // Delete the old banner after successful database update
+  if (oldBannerPublicId) {
+    try {
+      await cloudinary.uploader.destroy(oldBannerPublicId);
+    } catch (error) {
+      console.error("Failed to delete old event banner:", error.message);
+    }
+  }
+  return event;
+};
+
 module.exports = {
   createEvent,
   publishEvent,
   updateEvent,
+  deleteEvent,
+  uploadEventBanner,
+  publishedEvent,
 };
