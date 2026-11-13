@@ -3,11 +3,13 @@ const express = require("express");
 const {
   registerForEventController,
   cancelRegistrationController,
+  getRegistrationHistoryController,
 } = require("../controllers/registrationController");
 
 const {
   registerForEventSchema,
   cancelRegistrationSchema,
+  registrationHistorySchema,
 } = require("../validators/registerValidator");
 
 const validate = require("../middlewares/validate");
@@ -32,6 +34,15 @@ router.patch(
   authorize("user"),
   validate(cancelRegistrationSchema, "params"),
   cancelRegistrationController,
+);
+
+// view registration history
+router.get(
+  "/registrations/history",
+  authenticate,
+  authorize("user"),
+  validate(registrationHistorySchema, "query"),
+  getRegistrationHistoryController,
 );
 
 module.exports = router;

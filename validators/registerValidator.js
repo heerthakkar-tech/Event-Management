@@ -14,7 +14,15 @@ const cancelRegistrationSchema = Joi.object({
     .required(),
 });
 
+// View registration history schema
+const registrationHistorySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+
+  limit: Joi.number().integer().min(1).max(100).default(10),
+});
+
 module.exports = {
   registerForEventSchema,
   cancelRegistrationSchema,
+  registrationHistorySchema,
 };

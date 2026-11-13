@@ -1,5 +1,7 @@
-const { Event, EventRegistration, sequelize } = require("../models");
+const { Event, EventRegistration, User, sequelize } = require("../models");
 const { Op } = require("sequelize");
+const sendRegistrationEmail = require("../utils/registrationEmail");
+const sendWaitlistPromotionEmail = require("../utils/sendWaitlistPromotionEmail");
 
 // Register for event
 const registerForEvent = async (eventId, userId) => {
@@ -104,6 +106,25 @@ const registerForEvent = async (eventId, userId) => {
     // Commit transaction
     await transaction.commit();
 
+    // Send registration email
+    try {
+      const user = await User.findByPk(userId);
+
+      if (user) {
+        await sendRegistrationEmail({
+          name: user.name,
+          email: user.email,
+          eventTitle: event.title,
+          eventStartAt: event.startAt,
+          eventLocation: event.location,
+          status: registration.status,
+          waitlistPosition: registration.waitlistPosition,
+        });
+      }
+    } catch (emailError) {
+      console.error("Registration email failed:", emailError);
+    }
+
     return registration;
   } catch (error) {
     // Rollback transaction if something fails
@@ -116,8 +137,10 @@ const registerForEvent = async (eventId, userId) => {
 };
 
 // cancel registration
+
 const cancelRegistration = async (eventId, userId) => {
   let transaction;
+  let promotedRegistration = null;
 
   try {
     transaction = await sequelize.transaction();
@@ -185,6 +208,9 @@ const cancelRegistration = async (eventId, userId) => {
         firstWaitlistedUser.waitlistPosition = null;
 
         await firstWaitlistedUser.save({ transaction });
+
+        // store promoted registration for email
+        promotedRegistration = firstWaitlistedUser;
       }
     } else if (cancelledWaitlistPosition !== null) {
       // find users behind the cancelled user
@@ -212,9 +238,28 @@ const cancelRegistration = async (eventId, userId) => {
     // commit transaction
     await transaction.commit();
 
+    // send promotion email after successful transaction
+    if (promotedRegistration) {
+      try {
+        const promotedUser = await User.findByPk(promotedRegistration.userId);
+
+        if (promotedUser) {
+          await sendWaitlistPromotionEmail({
+            name: promotedUser.name,
+            email: promotedUser.email,
+            eventTitle: event.title,
+            eventStartAt: event.startAt,
+            eventLocation: event.location,
+          });
+        }
+      } catch (emailError) {
+        console.error("Waitlist promotion email failed:", emailError);
+      }
+    }
+
     return registration;
   } catch (error) {
-    //  if a transaction exists and it has not already finished roll it back.
+    // rollback transaction if it has not already finished
     if (transaction && !transaction.finished) {
       await transaction.rollback();
     }
@@ -223,7 +268,71 @@ const cancelRegistration = async (eventId, userId) => {
   }
 };
 
+// Get user registration history
+
+const getRegistrationHistory = async (userId, page, limit) => {
+  // Get registration summary
+  const [totalRegistrations, confirmed, waitlisted, cancelled] =
+    await Promise.all([
+      EventRegistration.count({
+        where: { userId },
+      }),
+      EventRegistration.count({
+        where: { userId, status: "confirmed" },
+      }),
+      EventRegistration.count({
+        where: { userId, status: "waitlisted" },
+      }),
+      EventRegistration.count({
+        where: { userId, status: "cancelled" },
+      }),
+    ]);
+
+  // Calculate pagination offset
+  const offset = (page - 1) * limit;
+
+  // Get users registration records with event details
+  const { count, rows } = await EventRegistration.findAndCountAll({
+    where: { userId },
+    include: [
+      {
+        model: Event,
+        as: "event",
+        attributes: [
+          "id",
+          "title",
+          "bannerUrl",
+          "startAt",
+          "endAt",
+          "location",
+        ],
+      },
+    ],
+    order: [["registeredAt", "DESC"]],
+    limit,
+    offset,
+  });
+
+  // return the history
+  return {
+    summary: {
+      totalRegistrations,
+      confirmed,
+      waitlisted,
+      cancelled,
+    },
+    registrations: rows,
+    pagination: {
+      currentPage: page,
+      limit,
+      totalRecords: count,
+      totalPages: Math.ceil(count / limit),
+    },
+  };
+};
+
 module.exports = {
   registerForEvent,
   cancelRegistration,
+  getRegistrationHistory,
 };

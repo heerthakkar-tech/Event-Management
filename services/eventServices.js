@@ -1,8 +1,9 @@
-const { Event, Category } = require("../models");
+const { Event, Category, EventRegistration } = require("../models");
 const ROLES = require("../constants/roles");
 const { scheduleEventPublish } = require("./eventScheduler");
 const { Readable } = require("stream");
 const cloudinary = require("../config/cloudinary");
+//const sendScheduleUpdateEmail = require("../utils/scheduleUpdateEmail");
 
 const ALLOWED_FIELDS = [
   "title",
@@ -303,6 +304,7 @@ const updateEvent = async ({ eventId, user, updates }) => {
 
   await event.save();
   //If a scheduled event's publication time is updated, reschedule its publication job.
+
   if (
     event.status === "scheduled" &&
     Object.prototype.hasOwnProperty.call(updates, "publishAt")
@@ -318,18 +320,19 @@ const updateEvent = async ({ eventId, user, updates }) => {
 };
 
 //delete event api
+
 const deleteEvent = async ({ eventId, user }) => {
-  // find the particular event by its eventId
+  // Find the particular event by its eventId
   const event = await Event.findByPk(eventId);
 
-  // check that the event is exist in the db or not.
+  // Check whether the event exists
   if (!event) {
     const error = new Error("Event not found");
     error.statusCode = 404;
     throw error;
   }
 
-  // authorized user can delete the event
+  // Check authorization
   const isSuperAdmin = user.role === ROLES.SUPER_ADMIN;
   const isOwner = String(event.organizerId) === String(user.id);
 
@@ -339,16 +342,31 @@ const deleteEvent = async ({ eventId, user }) => {
     throw error;
   }
 
-  //cancelled event cannot be deleted
+  // Cancelled event cannot be deleted
   if (event.status === "cancelled") {
-    const error = new Error("cancelled events cannot be delete");
+    const error = new Error("Cancelled events cannot be deleted");
     error.statusCode = 400;
     throw error;
   }
+
+  // Check whether the event has any registrations
+  const registrationCount = await EventRegistration.count({
+    where: { eventId },
+  });
+
+  if (registrationCount > 0) {
+    const error = new Error(
+      "Cannot delete this event because registrations exist",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Delete event
   await event.destroy();
 
   return {
-    message: "event deleted successfully",
+    message: "Event deleted successfully",
   };
 };
 
