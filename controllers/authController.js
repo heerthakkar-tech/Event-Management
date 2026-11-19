@@ -1,158 +1,100 @@
 const authService = require("../services/authServices");
+const sendResponse = require("../utils/response");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
 
-const register = async (req, res) => {
+// Handle authentication errors
+const handleAuthError = (error, next) => {
+  if (
+    error.name === "JsonWebTokenError" ||
+    error.name === "TokenExpiredError" ||
+    error.name === "NotBeforeError"
+  ) {
+    error.statusCode = STATUS_CODES.UNAUTHORIZED;
+    error.message = MESSAGES.INVALID_OR_EXPIRED_REFRESH_TOKEN;
+  }
+
+  return next(error);
+};
+
+// Register
+const register = async (req, res, next) => {
   try {
     const result = await authService.registerUser(req.body);
 
-    return res.status(201).json({
-      data: result.user,
-      meta: {
-        message: "User registered successfully",
-        code: 1,
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      },
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.CREATED,
+      MESSAGES.USER_REGISTERED_SUCCESSFULLY,
+      result,
+    );
   } catch (error) {
-    console.error("Registration error:", error);
-
-    const statusCode = error.statusCode || 500;
-
-    return res.status(statusCode).json({
-      data: null,
-      meta: {
-        message: error.statusCode ? error.message : "Internal server error",
-        code: 0,
-      },
-    });
+    return next(error);
   }
 };
 
-const login = async (req, res) => {
+// Login
+const login = async (req, res, next) => {
   try {
     const result = await authService.loginUser(req.body);
 
-    return res.status(200).json({
-      data: result.user,
-      meta: {
-        message: "Login successful",
-        code: 1,
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      },
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.LOGIN_SUCCESSFUL,
+      result,
+    );
   } catch (error) {
-    console.error("Login error:", error.message);
-
-    return res.status(error.statusCode || 500).json({
-      data: null,
-      meta: {
-        message: error.statusCode ? error.message : "Internal server error",
-        code: 0,
-      },
-    });
+    return next(error);
   }
 };
-const refreshToken = async (req, res) => {
+
+// Refresh access token
+const refreshToken = async (req, res, next) => {
   try {
     const result = await authService.refreshToken(req.body);
 
-    return res.status(200).json({
-      data: {
-        accessToken: result.accessToken,
-      },
-      meta: {
-        message: "Access token refreshed successfully",
-        code: 1,
-      },
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.ACCESS_TOKEN_REFRESHED_SUCCESSFULLY,
+      result,
+    );
   } catch (error) {
-    if (
-      error.name === "JsonWebTokenError" ||
-      error.name === "TokenExpiredError" ||
-      error.name === "NotBeforeError"
-    ) {
-      return res.status(401).json({
-        message: "Invalid or expired refresh token",
-      });
-    }
-
-    return res.status(error.statusCode || 500).json({
-      message:
-        error.statusCode || error.statusCode === 401
-          ? error.message
-          : "Internal server error",
-    });
+    return handleAuthError(error, next);
   }
 };
 
-const forgotPassword = async (req, res) => {
+// Forgot password
+const forgotPassword = async (req, res, next) => {
   try {
     const result = await authService.forgotPassword(req.body);
 
-    return res.status(200).json({
-      data: null,
-      meta: {
-        message: result.message,
-        code: 1,
-      },
-    });
+    return sendResponse(res, STATUS_CODES.OK, result.message, null);
   } catch (error) {
-    console.error("Forgot password error:", error.message);
-
-    return res.status(error.statusCode || 500).json({
-      data: null,
-      meta: {
-        message: error.statusCode ? error.message : "Internal server error",
-        code: 0,
-      },
-    });
+    return next(error);
   }
 };
 
-const resetPassword = async (req, res) => {
+// Reset password
+const resetPassword = async (req, res, next) => {
   try {
     const result = await authService.resetPassword(req.body);
 
-    return res.status(200).json({
-      data: null,
-      meta: {
-        message: result.message,
-        code: 1,
-      },
-    });
+    return sendResponse(res, STATUS_CODES.OK, result.message, null);
   } catch (error) {
-    console.error("Reset password error:", error.message);
-
-    return res.status(error.statusCode || 500).json({
-      data: null,
-      meta: {
-        message: error.statusCode ? error.message : "Internal server error",
-        code: 0,
-      },
-    });
+    return next(error);
   }
 };
 
-const logout = async (req, res) => {
+// Logout
+const logout = async (req, res, next) => {
   try {
     const result = await authService.logoutUser(req.body);
 
-    return res.status(200).json({
-      data: null,
-      meta: {
-        message: result.message,
-        code: 1,
-      },
-    });
+    return sendResponse(res, STATUS_CODES.OK, result.message, null);
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      data: null,
-      meta: {
-        message: error.message || "Internal server error",
-        code: 0,
-      },
-    });
+    return handleAuthError(error, next);
   }
 };
 

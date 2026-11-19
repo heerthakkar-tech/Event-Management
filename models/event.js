@@ -1,5 +1,3 @@
-"use strict";
-
 const { Model, DataTypes } = require("sequelize");
 
 module.exports = (sequelize) => {
@@ -13,6 +11,11 @@ module.exports = (sequelize) => {
       Event.belongsTo(models.Category, {
         foreignKey: "categoryId",
         as: "category",
+      });
+
+      Event.hasMany(models.EventRegistration, {
+        foreignKey: "eventId",
+        as: "registrations",
       });
     }
   }

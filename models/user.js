@@ -8,6 +8,11 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: "userId",
         as: "sessions",
       });
+
+      User.hasMany(models.EventRegistration, {
+        foreignKey: "userId",
+        as: "registrations",
+      });
     }
   }
 

@@ -1,29 +1,35 @@
-const { Result } = require("pg");
 const {
   createEvent,
   publishEvent,
   updateEvent,
+  deleteEvent,
+  uploadEventBanner,
+  publishedEvent,
 } = require("../services/eventServices");
 
-//create event controller
-const createEventController = async (req, res) => {
+const sendResponse = require("../utils/response");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+const EVENT_STATUS = require("../constants/eventStatus");
+
+// Create event controller
+const createEventController = async (req, res, next) => {
   try {
     const event = await createEvent(req.body, req.user.id);
 
-    return res.status(201).json({
-      message: "Event created successfully",
-      data: {
-        event,
-      },
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.CREATED,
+      MESSAGES.EVENT_CREATED_SUCCESSFULLY,
+      { event },
+    );
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.statusCode ? error.message : "Internal server error",
-    });
+    return next(error);
   }
 };
-// publish event controller
-const publishEventController = async (req, res) => {
+
+// Publish event controller
+const publishEventController = async (req, res, next) => {
   try {
     const event = await publishEvent(
       req.params.eventId,
@@ -31,40 +37,97 @@ const publishEventController = async (req, res) => {
       req.user.role,
     );
 
-    return res.status(200).json({
-      message:
-        event.status === "scheduled"
-          ? "Event scheduled for publication successfully"
-          : "Event published successfully",
-      data: {
-        event,
-      },
-    });
+    const message =
+      event.status === EVENT_STATUS.SCHEDULED
+        ? MESSAGES.EVENT_SCHEDULED_FOR_PUBLICATION_SUCCESSFULLY
+        : MESSAGES.EVENT_PUBLISHED_SUCCESSFULLY;
+
+    return sendResponse(res, STATUS_CODES.OK, message, { event });
   } catch (error) {
-    return res.status(error.statusCode || 500).json({
-      message: error.statusCode ? error.message : "Internal server error",
-    });
+    return next(error);
   }
 };
 
-//update event controller
+// View all published events
+const publishedEventController = async (req, res, next) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+
+    const result = await publishedEvent({ page, limit });
+
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.EVENTS_FETCHED_SUCCESSFULLY,
+      result,
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// Update event controller
 const updateEventController = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const updates = req.body;
 
-    const event = await updateEvent({
+    const result = await updateEvent({
       eventId,
       user: req.user,
       updates,
     });
 
-    return res.status(200).json({
-      message: "Event updated successfully",
-      data: event,
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.EVENT_UPDATED_SUCCESSFULLY,
+      result,
+    );
   } catch (error) {
-    next(error);
+    return next(error);
+  }
+};
+
+// Delete event controller
+const deleteEventController = async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+    const user = req.user;
+
+    const result = await deleteEvent({ eventId, user });
+
+    return sendResponse(res, STATUS_CODES.OK, result.message);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// Upload event banner controller
+const uploadBannerController = async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+    const user = req.user;
+    const file = req.file;
+
+    const event = await uploadEventBanner({
+      eventId,
+      user,
+      file,
+    });
+
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.EVENT_BANNER_UPLOADED_SUCCESSFULLY,
+      {
+        bannerUrl: event.bannerUrl,
+        bannerPublicId: event.bannerPublicId,
+      },
+    );
+  } catch (error) {
+    return next(error);
   }
 };
 
@@ -72,4 +135,7 @@ module.exports = {
   createEventController,
   publishEventController,
   updateEventController,
+  deleteEventController,
+  uploadBannerController,
+  publishedEventController,
 };

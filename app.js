@@ -1,14 +1,14 @@
 require("dotenv").config();
 const express = require("express");
-const pg = require("pg");
 const cors = require("cors");
 const helmet = require("helmet"); // secure your app by setting various HTTP headers.
 
 const sequelize = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const eventRoutes = require("./routes/eventRoutes");
+const registrationRoutes = require("./routes/registrationRoute");
 const { restoreScheduledEvents } = require("./services/eventScheduler");
-// const testRoutes = require("./routes/testRoutes");
+const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -22,20 +22,13 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/events", eventRoutes);
-// app.use("/api/v1/test", testRoutes);
+app.use("/api/v1/events", registrationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Hello i am root");
 });
 
-app.use((err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
-
-  res.status(statusCode).json({
-    success: false,
-    message: statusCode === 500 ? "Internal server error" : err.message,
-  });
-});
+app.use(errorHandler);
 
 async function startServer() {
   try {

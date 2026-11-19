@@ -11,14 +11,16 @@ const ROLES = require("../constants/roles");
 const { Op } = require("sequelize");
 const crypto = require("crypto");
 const transporter = require("../config/mailer");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+const AppError = require("../utils/AppError");
 
 const registerUser = async ({ name, email, password, role }) => {
   if (role === ROLES.SUPER_ADMIN) {
-    const error = new Error("Super admin registration is not allowed");
-
-    error.statusCode = 403;
-
-    throw error;
+    throw new AppError(
+      MESSAGES.SUPER_ADMIN_REGISTRATION_NOT_ALLOWED,
+      STATUS_CODES.FORBIDDEN,
+    );
   }
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -29,9 +31,10 @@ const registerUser = async ({ name, email, password, role }) => {
     });
 
     if (existingUser) {
-      const error = new Error("Email is already registered");
-      error.statusCode = 409;
-      throw error;
+      throw new AppError(
+        MESSAGES.EMAIL_ALREADY_REGISTERED,
+        STATUS_CODES.CONFLICT,
+      );
     }
 
     const newUser = await User.create(
@@ -79,17 +82,19 @@ const loginUser = async ({ email, password }) => {
     });
 
     if (!user) {
-      const error = new Error("Invalid email or password");
-      error.statusCode = 401;
-      throw error;
+      throw new AppError(
+        MESSAGES.INVALID_EMAIL_OR_PASSWORD,
+        STATUS_CODES.UNAUTHORIZED,
+      );
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      const error = new Error("Invalid email or password");
-      error.statusCode = 401;
-      throw error;
+      throw new AppError(
+        MESSAGES.INVALID_EMAIL_OR_PASSWORD,
+        STATUS_CODES.UNAUTHORIZED,
+      );
     }
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -133,17 +138,16 @@ const refreshToken = async ({ refreshToken }) => {
     },
   });
   if (!session) {
-    const error = new Error("Session not found or inactive");
-    error.statusCode = 401;
-    throw error;
+    throw new AppError(
+      MESSAGES.SESSION_NOT_FOUND_OR_INACTIVE,
+      STATUS_CODES.UNAUTHORIZED,
+    );
   }
 
   const user = await User.findByPk(payload.id);
 
   if (!user) {
-    const error = new Error("User not found");
-    error.statusCode = 401;
-    throw error;
+    throw new AppError(MESSAGES.USER_NOT_FOUND, STATUS_CODES.NOT_FOUND);
   }
 
   const accessToken = signAccessToken(user, session.id);
@@ -152,8 +156,7 @@ const refreshToken = async ({ refreshToken }) => {
   };
 };
 const forgotPassword = async ({ email }) => {
-  const message =
-    "If the email is registered, a password reset link will be sent.";
+  const message = MESSAGES.PASSWORD_RESET_REQUEST_SENT;
   const user = await User.findOne({
     where: { email },
   });
@@ -189,52 +192,73 @@ const forgotPassword = async ({ email }) => {
 };
 
 const resetPassword = async ({ token, newPassword }) => {
-  const resetTokenHash = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
+  return sequelize.transaction(async (transaction) => {
+    const resetTokenHash = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
 
-  const user = await User.findOne({
-    where: {
-      resetToken: resetTokenHash,
-    },
-  });
+    const user = await User.findOne({
+      where: {
+        resetToken: resetTokenHash,
+      },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
 
-  if (!user) {
-    const error = new Error("Invalid or expired reset token.");
-    error.statusCode = 400;
-    throw error;
-  }
+    if (!user) {
+      throw new AppError(
+        MESSAGES.INVALID_OR_EXPIRED_RESET_TOKEN,
+        STATUS_CODES.BAD_REQUEST,
+      );
+    }
 
-  if (
-    !user.resetTokenExpiresAt ||
-    new Date(user.resetTokenExpiresAt) <= new Date()
-  ) {
-    const error = new Error("Invalid or expired reset token.");
-    error.statusCode = 400;
-    throw error;
-  }
-  const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (
+      !user.resetTokenExpiresAt ||
+      new Date(user.resetTokenExpiresAt) <= new Date()
+    ) {
+      throw new AppError(
+        MESSAGES.INVALID_OR_EXPIRED_RESET_TOKEN,
+        STATUS_CODES.BAD_REQUEST,
+      );
+    }
 
-  if (isSamePassword) {
-    const error = new Error(
-      "New password must be different from your current password.",
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+
+    if (isSamePassword) {
+      throw new AppError(
+        MESSAGES.NEW_PASSWORD_MUST_BE_DIFFERENT,
+        STATUS_CODES.BAD_REQUEST,
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await user.update(
+      {
+        password: hashedPassword,
+        resetToken: null,
+        resetTokenExpiresAt: null,
+      },
+      { transaction },
     );
-    error.statusCode = 400;
-    throw error;
-  }
 
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-  await user.update({
-    password: hashedPassword,
-    resetToken: null,
-    resetTokenExpiresAt: null,
+    await Session.update(
+      {
+        status: "inactive",
+      },
+      {
+        where: {
+          userId: user.id,
+          status: "active",
+        },
+        transaction,
+      },
+    );
+    return {
+      message: MESSAGES.PASSWORD_RESET_SUCCESSFULLY,
+    };
   });
-
-  return {
-    message: "Password reset successfully.",
-  };
 };
 
 const logoutUser = async ({ refreshToken }) => {
@@ -251,16 +275,17 @@ const logoutUser = async ({ refreshToken }) => {
     },
   });
   if (!session) {
-    const error = new Error("Session not found or inactive");
-    error.statusCode = 401;
-    throw error;
+    throw new AppError(
+      MESSAGES.SESSION_NOT_FOUND_OR_INACTIVE,
+      STATUS_CODES.UNAUTHORIZED,
+    );
   }
   await session.update({
     status: "inactive",
   });
 
   return {
-    message: "Logged out successfully",
+    message: MESSAGES.LOGGED_OUT_SUCCESSFULLY,
   };
 };
 

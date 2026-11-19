@@ -51,8 +51,28 @@ const loginSchema = Joi.object({
     "string.empty": "Password is required",
   }),
 });
+const forgotPasswordSchema = Joi.object({
+  email: Joi.string().trim().email().required().messages({
+    "string.empty": "Email is required",
+    "string.email": "Please enter a valid email address",
+    "any.required": "Email is required",
+  }),
+});
+const resetPasswordSchema = Joi.object({
+  token: Joi.string().required().messages({
+    "string.empty": "Reset token is required",
+    "any.required": "Reset token is required",
+  }),
 
+  newPassword: Joi.string().min(8).required().messages({
+    "string.empty": "New password is required",
+    "string.min": "Password must be at least 8 characters",
+    "any.required": "New password is required",
+  }),
+});
 module.exports = {
   registerSchema,
   loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 };
