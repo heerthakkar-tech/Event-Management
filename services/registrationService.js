@@ -2,6 +2,11 @@ const { Event, EventRegistration, User, sequelize } = require("../models");
 const { Op } = require("sequelize");
 const sendRegistrationEmail = require("../utils/registrationEmail");
 const sendWaitlistPromotionEmail = require("../utils/sendWaitlistPromotionEmail");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+const AppError = require("../utils/AppError");
+const EVENT_STATUS = require("../constants/eventStatus");
+const REGISTRATION_STATUS = require("../constants/registrationStatus");
 
 // Register for event
 const registerForEvent = async (eventId, userId) => {
@@ -18,25 +23,25 @@ const registerForEvent = async (eventId, userId) => {
 
     // Check event exists
     if (!event) {
-      const error = new Error("Event Not Found");
-      error.statusCode = 404;
-      throw error;
+      throw new AppError(MESSAGES.EVENT_NOT_FOUND, STATUS_CODES.NOT_FOUND);
     }
 
     // Check event status
-    if (event.status !== "published") {
-      const error = new Error("You can only register for published events");
-      error.statusCode = 400;
-      throw error;
+    if (event.status !== EVENT_STATUS.PUBLISHED) {
+      throw new AppError(
+        MESSAGES.ONLY_REGISTER_FOR_PUBLISHED_EVENTS,
+        STATUS_CODES.BAD_REQUEST,
+      );
     }
 
     // Check registration deadline
     const now = new Date();
 
     if (new Date(event.startAt) <= now) {
-      const error = new Error("Registration deadline has passed");
-      error.statusCode = 400;
-      throw error;
+      throw new AppError(
+        MESSAGES.REGISTRATION_DEADLINE_PASSED,
+        STATUS_CODES.BAD_REQUEST,
+      );
     }
 
     // Check duplicate active registration
@@ -45,23 +50,27 @@ const registerForEvent = async (eventId, userId) => {
         eventId,
         userId,
         status: {
-          [Op.in]: ["confirmed", "waitlisted"],
+          [Op.in]: [
+            REGISTRATION_STATUS.CONFIRMED,
+            REGISTRATION_STATUS.WAITLISTED,
+          ],
         },
       },
       transaction,
     });
 
     if (existingRegistration) {
-      const error = new Error("You have already registered for this event");
-      error.statusCode = 409;
-      throw error;
+      throw new AppError(
+        MESSAGES.ALREADY_REGISTERED_FOR_EVENT,
+        STATUS_CODES.CONFLICT,
+      );
     }
 
     // Check event capacity
     const confirmedRegistrations = await EventRegistration.count({
       where: {
         eventId,
-        status: "confirmed",
+        status: REGISTRATION_STATUS.CONFIRMED,
       },
       transaction,
     });
@@ -73,12 +82,12 @@ const registerForEvent = async (eventId, userId) => {
     let waitlistPosition = null;
 
     if (isEventFull) {
-      registrationStatus = "waitlisted";
+      registrationStatus = REGISTRATION_STATUS.WAITLISTED;
 
       const lastWaitlistedUser = await EventRegistration.findOne({
         where: {
           eventId,
-          status: "waitlisted",
+          status: REGISTRATION_STATUS.WAITLISTED,
         },
         order: [["waitlistPosition", "DESC"]],
         transaction,
@@ -88,7 +97,7 @@ const registerForEvent = async (eventId, userId) => {
         ? lastWaitlistedUser.waitlistPosition + 1
         : 1;
     } else {
-      registrationStatus = "confirmed";
+      registrationStatus = REGISTRATION_STATUS.CONFIRMED;
     }
 
     // Create event registration
@@ -137,7 +146,6 @@ const registerForEvent = async (eventId, userId) => {
 };
 
 // cancel registration
-
 const cancelRegistration = async (eventId, userId) => {
   let transaction;
   let promotedRegistration = null;
@@ -153,9 +161,7 @@ const cancelRegistration = async (eventId, userId) => {
 
     // check event exists
     if (!event) {
-      const error = new Error("Event Not Found");
-      error.statusCode = 404;
-      throw error;
+      throw new AppError(MESSAGES.EVENT_NOT_FOUND, STATUS_CODES.NOT_FOUND);
     }
 
     // find user active registration
@@ -164,7 +170,10 @@ const cancelRegistration = async (eventId, userId) => {
         eventId,
         userId,
         status: {
-          [Op.in]: ["confirmed", "waitlisted"],
+          [Op.in]: [
+            REGISTRATION_STATUS.CONFIRMED,
+            REGISTRATION_STATUS.WAITLISTED,
+          ],
         },
       },
       transaction,
@@ -173,18 +182,19 @@ const cancelRegistration = async (eventId, userId) => {
 
     // check if registration exists
     if (!registration) {
-      const error = new Error("Active registration not found");
-      error.statusCode = 404;
-      throw error;
+      throw new AppError(
+        MESSAGES.ACTIVE_REGISTRATION_NOT_FOUND,
+        STATUS_CODES.NOT_FOUND,
+      );
     }
 
-    const wasConfirmed = registration.status === "confirmed";
+    const wasConfirmed = registration.status === REGISTRATION_STATUS.CONFIRMED;
 
     // store original waitlist position
     const cancelledWaitlistPosition = registration.waitlistPosition;
 
     // cancel user registration
-    registration.status = "cancelled";
+    registration.status = REGISTRATION_STATUS.CANCELLED;
     registration.cancelledAt = new Date();
     registration.waitlistPosition = null;
 
@@ -195,7 +205,7 @@ const cancelRegistration = async (eventId, userId) => {
       const firstWaitlistedUser = await EventRegistration.findOne({
         where: {
           eventId,
-          status: "waitlisted",
+          status: REGISTRATION_STATUS.WAITLISTED,
         },
         order: [["waitlistPosition", "ASC"]],
         transaction,
@@ -204,20 +214,41 @@ const cancelRegistration = async (eventId, userId) => {
 
       // promote first waitlisted user
       if (firstWaitlistedUser) {
-        firstWaitlistedUser.status = "confirmed";
+        const promotedPosition = firstWaitlistedUser.waitlistPosition;
+        firstWaitlistedUser.status = REGISTRATION_STATUS.CONFIRMED;
         firstWaitlistedUser.waitlistPosition = null;
 
         await firstWaitlistedUser.save({ transaction });
 
         // store promoted registration for email
         promotedRegistration = firstWaitlistedUser;
+        const remainingWaitlistedUsers = await EventRegistration.findAll({
+          where: {
+            eventId,
+            status: REGISTRATION_STATUS.WAITLISTED,
+            waitlistPosition: {
+              [Op.gt]: promotedPosition,
+            },
+          },
+          order: [["waitlistPosition", "ASC"]],
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        for (const waitlistedUser of remainingWaitlistedUsers) {
+          waitlistedUser.waitlistPosition -= 1;
+
+          await waitlistedUser.save({
+            transaction,
+          });
+        }
       }
     } else if (cancelledWaitlistPosition !== null) {
       // find users behind the cancelled user
       const remainingWaitlistedUsers = await EventRegistration.findAll({
         where: {
           eventId,
-          status: "waitlisted",
+          status: REGISTRATION_STATUS.WAITLISTED,
           waitlistPosition: {
             [Op.gt]: cancelledWaitlistPosition,
           },
@@ -269,7 +300,6 @@ const cancelRegistration = async (eventId, userId) => {
 };
 
 // Get user registration history
-
 const getRegistrationHistory = async (userId, page, limit) => {
   // Get registration summary
   const [totalRegistrations, confirmed, waitlisted, cancelled] =
@@ -278,13 +308,13 @@ const getRegistrationHistory = async (userId, page, limit) => {
         where: { userId },
       }),
       EventRegistration.count({
-        where: { userId, status: "confirmed" },
+        where: { userId, status: REGISTRATION_STATUS.CONFIRMED },
       }),
       EventRegistration.count({
-        where: { userId, status: "waitlisted" },
+        where: { userId, status: REGISTRATION_STATUS.WAITLISTED },
       }),
       EventRegistration.count({
-        where: { userId, status: "cancelled" },
+        where: { userId, status: REGISTRATION_STATUS.CANCELLED },
       }),
     ]);
 

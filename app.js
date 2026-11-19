@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const pg = require("pg");
 const cors = require("cors");
 const helmet = require("helmet"); // secure your app by setting various HTTP headers.
 
@@ -9,6 +8,7 @@ const authRoutes = require("./routes/authRoutes");
 const eventRoutes = require("./routes/eventRoutes");
 const registrationRoutes = require("./routes/registrationRoute");
 const { restoreScheduledEvents } = require("./services/eventScheduler");
+const errorHandler = require("./middlewares/errorHandler");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -28,15 +28,7 @@ app.get("/", (req, res) => {
   res.send("Hello i am root");
 });
 
-app.use((err, req, res, next) => {
-  // console.error("ERROR DETAILS:", err);
-  const statusCode = err.statusCode || 500;
-
-  res.status(statusCode).json({
-    success: false,
-    message: statusCode === 500 ? "Internal server error" : err.message,
-  });
-});
+app.use(errorHandler);
 
 async function startServer() {
   try {

@@ -4,43 +4,49 @@ const {
   getRegistrationHistory,
 } = require("../services/registrationService");
 
-//registration user controller
+const sendResponse = require("../utils/response");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+
+// Register user for event
 const registerForEventController = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
 
     const registration = await registerForEvent(eventId, userId);
-    return res.status(201).json({
-      success: true,
-      message: "Event registration successful",
-      data: {
-        registration,
-      },
-    });
+
+    return sendResponse(
+      res,
+      STATUS_CODES.CREATED,
+      MESSAGES.EVENT_REGISTRATION_SUCCESSFUL,
+      { registration },
+    );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
+// Cancel user registration
 const cancelRegistrationController = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
 
     const result = await cancelRegistration(eventId, userId);
-    return res.status(200).json({
-      success: true,
-      message: "Event registration cancelled successfully",
-      data: {
-        result,
-      },
-    });
+
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.EVENT_REGISTRATION_CANCELLED_SUCCESSFULLY,
+      { result },
+    );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
-// Get users registration history
+
+// Get user's registration history
 const getRegistrationHistoryController = async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -50,13 +56,14 @@ const getRegistrationHistoryController = async (req, res, next) => {
 
     const history = await getRegistrationHistory(userId, page, limit);
 
-    return res.status(200).json({
-      success: true,
-      message: "Registration history fetched successfully",
-      data: history,
-    });
+    return sendResponse(
+      res,
+      STATUS_CODES.OK,
+      MESSAGES.REGISTRATION_HISTORY_FETCHED_SUCCESSFULLY,
+      history,
+    );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 

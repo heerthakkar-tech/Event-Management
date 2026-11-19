@@ -1,4 +1,7 @@
 const multer = require("multer");
+const AppError = require("../utils/AppError");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
 
 const storage = multer.memoryStorage();
 
@@ -8,9 +11,11 @@ const fileFilter = (req, file, cb) => {
   if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    const error = new Error("Only JPEG, JPG, PNG, and WebP images are allowed");
+    const error = new AppError(
+      MESSAGES.ONLY_SUPPORTED_IMAGE_TYPES_ALLOWED,
+      STATUS_CODES.BAD_REQUEST,
+    );
 
-    error.statusCode = 400;
     cb(error);
   }
 };
@@ -28,10 +33,10 @@ const upload = multer({
 const validateImageContent = async (req, res, next) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "Banner image is required",
-      });
+      throw new AppError(
+        MESSAGES.BANNER_IMAGE_REQUIRED,
+        STATUS_CODES.BAD_REQUEST,
+      );
     }
 
     const { fileTypeFromBuffer } = await import("file-type");
@@ -41,22 +46,22 @@ const validateImageContent = async (req, res, next) => {
     const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
 
     if (!detectedType || !allowedTypes.includes(detectedType.mime)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid image content",
-      });
+      throw new AppError(
+        MESSAGES.INVALID_IMAGE_CONTENT,
+        STATUS_CODES.BAD_REQUEST,
+      );
     }
 
     if (detectedType.mime !== req.file.mimetype) {
-      return res.status(400).json({
-        success: false,
-        message: "Image content does not match its MIME type",
-      });
+      throw new AppError(
+        MESSAGES.IMAGE_CONTENT_MIME_TYPE_MISMATCH,
+        STATUS_CODES.BAD_REQUEST,
+      );
     }
 
-    next();
+    return next();
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 

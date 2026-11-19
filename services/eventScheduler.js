@@ -1,6 +1,7 @@
 const schedule = require("node-schedule");
 const { Event } = require("../models");
 const { Op } = require("sequelize");
+const EVENT_STATUS = require("../constants/eventStatus");
 
 const scheduleEventPublish = (event) => {
   const jobName = `publish-${event.id}`;
@@ -11,7 +12,7 @@ const scheduleEventPublish = (event) => {
     return;
   }
 
-  if (event.status !== "scheduled") {
+  if (event.status !== EVENT_STATUS.SCHEDULED) {
     return;
   }
 
@@ -23,18 +24,19 @@ const scheduleEventPublish = (event) => {
 
   const job = schedule.scheduleJob(jobName, publishTime, async () => {
     try {
+      // find event again because it is possible that event is scheduled yesterday , today someone cancelled it and te scheduled time arrives so we should not publish the cancelled event
       const currentEvent = await Event.findByPk(event.id);
 
       if (
         !currentEvent ||
-        currentEvent.status !== "scheduled" ||
+        currentEvent.status !== EVENT_STATUS.SCHEDULED ||
         !currentEvent.publishAt ||
         new Date(currentEvent.publishAt) > new Date()
       ) {
         return;
       }
 
-      currentEvent.status = "published";
+      currentEvent.status = EVENT_STATUS.PUBLISHED;
       currentEvent.publishedAt = new Date();
 
       await currentEvent.save();
@@ -55,7 +57,7 @@ const scheduleEventPublish = (event) => {
 const restoreScheduledEvents = async () => {
   const events = await Event.findAll({
     where: {
-      status: "scheduled",
+      status: EVENT_STATUS.SCHEDULED,
       publishAt: {
         [Op.gt]: new Date(),
       },

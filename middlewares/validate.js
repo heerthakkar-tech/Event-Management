@@ -1,3 +1,7 @@
+const AppError = require("../utils/AppError");
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+
 const validate = (schema, source = "body") => {
   return (req, res, next) => {
     const { error, value } = schema.validate(req[source], {
@@ -5,14 +9,18 @@ const validate = (schema, source = "body") => {
     });
 
     if (error) {
-      return res.status(400).json({
-        message: "Validation failed",
-        errors: error.details.map((detail) => detail.message),
-      });
+      const validationError = new AppError(
+        MESSAGES.VALIDATION_FAILED,
+        STATUS_CODES.BAD_REQUEST,
+      );
+
+      validationError.errors = error.details.map((detail) => detail.message);
+
+      return next(validationError);
     }
 
     req[source] = value;
-    next();
+    return next();
   };
 };
 

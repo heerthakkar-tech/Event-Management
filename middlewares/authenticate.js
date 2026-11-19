@@ -2,25 +2,30 @@ const { User, Session } = require("../models");
 const { Op } = require("sequelize");
 const { verifyAccessToken } = require("../config/jwt");
 
+const STATUS_CODES = require("../constants/statusCodes");
+const MESSAGES = require("../constants/messages");
+const AppError = require("../utils/AppError");
+
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        message: "Access token is required",
-      });
+      throw new AppError(
+        MESSAGES.ACCESS_TOKEN_REQUIRED,
+        STATUS_CODES.UNAUTHORIZED,
+      );
     }
 
     const token = authHeader.split(" ")[1];
     const payload = verifyAccessToken(token);
 
     if (!payload.id || !payload.sid || !payload.role) {
-      return res.status(401).json({
-        message: "Invalid access token payload",
-      });
+      throw new AppError(
+        MESSAGES.INVALID_ACCESS_TOKEN_PAYLOAD,
+        STATUS_CODES.UNAUTHORIZED,
+      );
     }
-
     const session = await Session.findOne({
       where: {
         id: payload.sid,
@@ -39,11 +44,11 @@ const authenticate = async (req, res, next) => {
         },
       ],
     });
-
     if (!session) {
-      return res.status(401).json({
-        message: "Session is invalid, expired, or inactive",
-      });
+      throw new AppError(
+        MESSAGES.SESSION_INVALID_EXPIRED_OR_INACTIVE,
+        STATUS_CODES.UNAUTHORIZED,
+      );
     }
 
     const user = session.user;
@@ -55,23 +60,18 @@ const authenticate = async (req, res, next) => {
       sid: session.id,
     };
 
-    next();
+    return next();
   } catch (error) {
     if (
       error.name === "JsonWebTokenError" ||
       error.name === "TokenExpiredError" ||
       error.name === "NotBeforeError"
     ) {
-      return res.status(401).json({
-        message: "Invalid or expired access token",
-      });
+      error.statusCode = STATUS_CODES.UNAUTHORIZED;
+      error.message = MESSAGES.INVALID_OR_EXPIRED_ACCESS_TOKEN;
     }
 
-    console.error("Authentication error:", error);
-
-    return res.status(500).json({
-      message: "Internal server error",
-    });
+    return next(error);
   }
 };
 

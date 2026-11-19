@@ -18,8 +18,7 @@ Event: ${eventTitle}
 Date: ${new Date(eventStartAt).toLocaleString()}
 Location: ${eventLocation}
 
-Your registration is now confirmed. We look forward to seeing you at the event!
-
+Your registration is now confirmed.
 Thank you.`;
 
   await transporter.sendMail({

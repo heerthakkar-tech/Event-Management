@@ -10,7 +10,7 @@ const signAccessToken = (user, sessionId) => {
     },
     process.env.JWT_ACCESS_SECRET,
     {
-      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
+      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "1d",
     },
   );
 };
@@ -41,7 +41,7 @@ const verifyAccessToken = (token) => {
 
 const verifyRefreshToken = (token) => {
   const payload = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-  console.log(payload);
+  //console.log(payload);
 
   if (payload.type !== "refresh") {
     throw new Error("Invalid refresh token type");
